@@ -1,3 +1,6 @@
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, log_loss, mean_absolute_error, mean_squared_error
 import pandas as pd
 import numpy as np
 
@@ -39,10 +42,6 @@ X = X.fillna(X.mean())
 
 y = df["HEAT_CLASS"]
 
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report
-
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, shuffle=False
 )
@@ -61,13 +60,22 @@ print(classification_report(y_test, pred))
 from sklearn.neural_network import MLPClassifier
 
 mlp = MLPClassifier(
-    hidden_layer_sizes=(16, 8), 
+    hidden_layer_sizes=(32, 16), 
+    alpha=0.001,
+    learning_rate_init=0.001,
     max_iter=500,
     random_state=42
 )
 mlp.fit(X_train, y_train)
 
-print(mlp.score(X_test, y_test))
+print("Test accuracy:", mlp.score(X_test, y_test))
+train_loss = log_loss(y_train, mlp.predict_proba(X_train))
+test_loss = log_loss(y_test, mlp.predict_proba(X_test))
+
+print("Train loss:", train_loss)
+print("Test loss:", test_loss)
+print("MAE:", mean_absolute_error(y_test, pred))
+print("RMSE:", np.sqrt(mean_squared_error(y_test, pred)))
 
 import matplotlib.pyplot as plt
 
