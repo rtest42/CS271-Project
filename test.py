@@ -1,5 +1,6 @@
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import classification_report, log_loss, mean_absolute_error, mean_squared_error
 import pandas as pd
 import numpy as np
@@ -56,8 +57,6 @@ print(y.value_counts())
 print(classification_report(y_test, pred))
 
 # exit()
-
-from sklearn.neural_network import MLPClassifier
 
 mlp = MLPClassifier(
     hidden_layer_sizes=(32, 16), 
