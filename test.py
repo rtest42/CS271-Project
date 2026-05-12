@@ -1,138 +1,104 @@
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.neural_network import MLPRegressor
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
-from sklearn.metrics import classification_report, log_loss, mean_absolute_error, root_mean_squared_error, precision_recall_curve, r2_score
-import matplotlib.pyplot as plt
-import pandas as pd
+import torch
+from torch.utils.data import Dataset
 import numpy as np
 
-## Load CSV and preprocess data
-df = pd.read_csv("USW00023293.csv", na_values=["", " ", "NA", "N/A", "null", "NULL", "NaN", "nan", "-9999"])
+class ClimateDataset(Dataset):
+    def __init__(self, data, seq_len=7):
+        """
+        data: numpy array of shape (num_days, 3) -> [TMIN, TMAX, TAVG]
+        """
+        self.data = data
+        self.seq_len = seq_len
 
-df["DATE"] = pd.to_datetime(df["DATE"])
-df = df.sort_values("DATE").set_index("DATE")
+    def __len__(self):
+        return len(self.data) - self.seq_len
 
-cols = ["TMIN", "TMAX", "TAVG"]
-df = df[cols]
+    def __getitem__(self, idx):
+        x = self.data[idx:idx+self.seq_len]          # (seq_len, 3)
+        y = self.data[idx+self.seq_len, 2]           # predict TAVG only
 
-df = df.interpolate(method="time")
-df = df.fillna(df.mean(numeric_only=True))
+        x = torch.tensor(x, dtype=torch.float32)
+        y = torch.tensor(y, dtype=torch.float32)
 
-## Time-based split
-split_idx = int(len(df) * 0.8)
+        return x, y
+    
+import torch
+import torch.nn as nn
 
-train_df = df.iloc[:split_idx].copy()
-test_df = df.iloc[split_idx:].copy()
+class LSTMModel(nn.Module):
+    def __init__(self, input_size=3, hidden_size=64):
+        super().__init__()
 
-## Feature engineering
-# Seasonal baseline (computed ONLY on train)
-monthly_mean = train_df.groupby(train_df.index.month)["TMAX"].mean() # type: ignore
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            batch_first=True
+        )
 
-train_df["TMAX_ANOMALY"] = train_df["TMAX"] - train_df.index.month.map(monthly_mean) # type: ignore
-test_df["TMAX_ANOMALY"] = test_df["TMAX"] - test_df.index.month.map(monthly_mean) # type: ignore
+        self.fc = nn.Linear(hidden_size, 1)
 
+    def forward(self, x):
+        # x: (batch, seq_len, features)
 
-# Seasonal threshold (95th percentile, train only)
-monthly_95 = train_df.groupby(train_df.index.month)["TMAX"].quantile(0.95) # type: ignore
+        out, _ = self.lstm(x)
 
-train_df["HEAT_CLASS"] = (train_df["TMAX"] >= train_df.index.month.map(monthly_95)).astype(int) # type: ignore
-test_df["HEAT_CLASS"] = (test_df["TMAX"] >= test_df.index.month.map(monthly_95)).astype(int) # type: ignore
+        out = out[:, -1, :]   # last timestep only
+        out = self.fc(out)    # (batch, 1)
 
+        return out
+    
+def train(model, loader, optimizer, criterion, device):
+    model.train()
 
-# Add seasonality encoding
-for d in [train_df, test_df]:
-    d["month_sin"] = np.sin(2 * np.pi * d.index.month / 12) # type: ignore
-    d["month_cos"] = np.cos(2 * np.pi * d.index.month / 12) # type: ignore
+    total_loss = 0
 
-## Feature and target selection
-features = ["TMIN", "TMAX", "TAVG", "TMAX_ANOMALY", "month_sin", "month_cos"]
+    for x, y in loader:
+        x = x.to(device)
+        y = y.to(device)
 
-X_train = train_df[features]
-y_train = train_df["HEAT_CLASS"]
+        # FIX SHAPES HERE
+        y = y.view(-1, 1)   # (batch, 1)
 
-X_test = test_df[features]
-y_test = test_df["HEAT_CLASS"]
+        preds = model(x)    # (batch, 1)
 
-## Model and evaluation (random forest with threshold tuning)
-model = RandomForestClassifier(n_estimators=200, random_state=42, class_weight="balanced")
-model.fit(X_train, y_train)
+        loss = criterion(preds, y)
 
-# Threshold tuning
-probs = model.predict_proba(X_test)[:, 1]
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-precision, recall, thresholds = precision_recall_curve(y_test, probs)
+        total_loss += loss.item()
 
-# Choose best F1 threshold
-f1_scores = 2 * (precision * recall) / (precision + recall + 1e-9)
-best_idx = np.argmax(f1_scores)
+    return total_loss / len(loader)
 
-best_threshold = thresholds[max(best_idx - 1, 0)]
+def evaluate(model, loader, criterion, device):
+    model.eval()
 
-pred = (probs >= best_threshold).astype(int)
+    total_loss = 0
+    preds_list = []
+    true_list = []
 
-# Evaluation
-print("Best threshold:", best_threshold)
-print("\nClass distribution (train):")
-print(y_train.value_counts(), "\n")
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device)
+            y = y.to(device)
 
-print("Class distribution (test):")
-print(y_test.value_counts(), "\n")
-print(classification_report(y_test, pred))
+            y = y.view(-1, 1)
 
-## ----------------------------
+            preds = model(x)
 
-## Lag features
-df["TMAX_lag1"] = df["TMAX"].shift(1)
-df["TMAX_lag2"] = df["TMAX"].shift(2)
-df["TAVG_lag1"] = df["TAVG"].shift(1)
+            loss = criterion(preds, y)
+            total_loss += loss.item()
 
-## Regression target
-df["TMAX_next"] = df["TMAX"].shift(-1)
-df = df.dropna()
+            # FIX: safe conversion
+            preds_list.extend(preds.cpu().view(-1).numpy())
+            true_list.extend(y.cpu().view(-1).numpy())
 
-## Features and target
-features = ["TMAX", "TAVG", "TMIN", "TMAX_lag1", "TMAX_lag2", "TAVG_lag1"]
+    return total_loss / len(loader), preds_list, true_list
 
-X = df[features]
-y = df["TMAX_next"]
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Train test split
-split = int(len(df) * 0.8)
+model = LSTMModel().to(device)
 
-X_train, X_test = X.iloc[:split], X.iloc[split:]
-y_train, y_test = y.iloc[:split], y.iloc[split:]
-
-## Model and evaluatinon (MLP)
-mlp = Pipeline([
-    ("scaler", StandardScaler()),
-    ("model", MLPRegressor(
-        hidden_layer_sizes=(64, 32),
-        max_iter=3000,
-        learning_rate_init=0.001,
-        random_state=42
-    ))
-])
-
-mlp.fit(X_train, y_train)
-pred = mlp.predict(X_test)
-
-pred_train = mlp.predict(X_train)
-pred_test = mlp.predict(X_test)
-
-# MLP Stats
-print("Train MAE:", mean_absolute_error(y_train, pred_train))
-print("Test MAE:", mean_absolute_error(y_test, pred_test))
-
-print("Train RMSE:", root_mean_squared_error(y_train, pred_train))
-print("Test RMSE:", root_mean_squared_error(y_test, pred_test))
-
-print("Test R²:", r2_score(y_test, pred_test))
-
-# MLP Graph
-plt.plot(mlp.named_steps["model"].loss_curve_)
-plt.title("MLP Training Loss")
-plt.xlabel("Epochs")
-plt.ylabel("Loss")
-plt.show()
+criterion = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
