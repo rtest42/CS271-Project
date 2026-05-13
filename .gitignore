@@ -184,3 +184,10 @@ cython_debug/
 *.nc
 
 # Machine Learning Models
+
+# MLFlow
+mlflow.db
+mlruns/
+
+# Maps
+*.png

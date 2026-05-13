@@ -5,18 +5,21 @@ import numpy as np
 from conv2d_rnncells import Conv2dLSTMCell, Conv2dGRUCell, Conv2dRNNCell
 
 class Conv2dRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, kernel_size, num_layers, bias, output_size, activation='tanh'):
+    def __init__(self, input_size: int, hidden_size: int, kernel_size: int | tuple[int, int], num_layers: int, bias: bool, output_size: int, activation: str = 'tanh'):
         super(Conv2dRNN, self).__init__()
 
         self.input_size = input_size
         self.hidden_size = hidden_size
 
-        if type(kernel_size) == tuple and len(kernel_size) == 2:
-            self.kernel_size = kernel_size
-            self.padding = (kernel_size[0] // 2, kernel_size[1] // 2)
-        elif type(kernel_size) == int:
+        if isinstance(kernel_size, int):
             self.kernel_size = (kernel_size, kernel_size)
             self.padding = (kernel_size // 2, kernel_size // 2)
+        elif isinstance(kernel_size, tuple):
+            if len(kernel_size) == 2:
+                self.kernel_size = kernel_size
+                self.padding = (kernel_size[0] // 2, kernel_size[1] // 2)
+            else:
+                raise ValueError("Kernel tuple must have length 2")
         else:
             raise ValueError("Invalid kernel size.")
 
@@ -60,17 +63,17 @@ class Conv2dRNN(nn.Module):
                              padding=self.padding,
                              bias=self.bias)
 
-    def forward(self, input, hx=None):
+    def forward(self, input_, hx = None):
 
-        # Input of shape (batch_size, seqence length, input_size)
+        # Input of shape (batch_size, sequence length, input_size)
         #
         # Output of shape (batch_size, output_size)
 
         if hx is None:
             if torch.cuda.is_available():
-                h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda()
+                h0 = torch.zeros(self.num_layers, input_.size(0), self.hidden_size, input_.size(-2), input_.size(-1)).cuda()
             else:
-                h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1))
+                h0 = torch.zeros(self.num_layers, input_.size(0), self.hidden_size, input_.size(-2), input_.size(-1))
 
         else:
              h0 = hx
@@ -83,12 +86,12 @@ class Conv2dRNN(nn.Module):
         for layer in range(self.num_layers):
             hidden.append(h0[layer])
 
-        for t in range(input.size(1)):
+        for t in range(input_.size(1)):
 
             for layer in range(self.num_layers):
 
                 if layer == 0:
-                    hidden_l = self.rnn_cell_list[layer](input[:, t], hidden[layer])
+                    hidden_l = self.rnn_cell_list[layer](input_[:, t], hidden[layer])
                 else:
                     hidden_l = self.rnn_cell_list[layer](hidden[layer - 1],hidden[layer])
 
@@ -104,18 +107,21 @@ class Conv2dRNN(nn.Module):
         return out
 
 class Conv2dLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size, kernel_size, num_layers, bias, output_size):
+    def __init__(self, input_size: int, hidden_size: int, kernel_size: int | tuple[int, int], num_layers: int, bias: bool, output_size: int):
         super(Conv2dLSTM, self).__init__()
 
         self.input_size = input_size
         self.hidden_size = hidden_size
 
-        if type(kernel_size) == tuple and len(kernel_size) == 2:
-            self.kernel_size = kernel_size
-            self.padding = (kernel_size[0] // 2, kernel_size[1] // 2)
-        elif type(kernel_size) == int:
+        if isinstance(kernel_size, int):
             self.kernel_size = (kernel_size, kernel_size)
             self.padding = (kernel_size // 2, kernel_size // 2)
+        elif isinstance(kernel_size, tuple):
+            if len(kernel_size) == 2:
+                self.kernel_size = kernel_size
+                self.padding = (kernel_size[0] // 2, kernel_size[1] // 2)
+            else:
+                raise ValueError("Kernel tuple must have length 2")
         else:
             raise ValueError("Invalid kernel size.")
 
@@ -141,17 +147,17 @@ class Conv2dLSTM(nn.Module):
                              padding=self.padding,
                              bias=self.bias)
 
-    def forward(self, input, hx=None):
+    def forward(self, input_, hx=None):
 
-        # Input of shape (batch_size, seqence length , input_size)
+        # Input of shape (batch_size, sequence length , input_size)
         #
         # Output of shape (batch_size, output_size)
 
         if hx is None:
             if torch.cuda.is_available():
-                h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda()
+                h0 = torch.zeros(self.num_layers, input_.size(0), self.hidden_size, input_.size(-2), input_.size(-1)).cuda()
             else:
-                h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1))
+                h0 = torch.zeros(self.num_layers, input_.size(0), self.hidden_size, input_.size(-2), input_.size(-1))
         else:
              h0 = hx
 
@@ -161,13 +167,13 @@ class Conv2dLSTM(nn.Module):
         for layer in range(self.num_layers):
             hidden.append((h0[layer], h0[layer]))
 
-        for t in range(input.size(1)):
-            hidden_l = []  # Supress unbound variable warning
+        for t in range(input_.size(1)):
+            hidden_l = []  # supress unbound variable warning
             for layer in range(self.num_layers):
 
                 if layer == 0:
                     hidden_l = self.rnn_cell_list[layer](
-                        input[:, t, :],
+                        input_[:, t, :],
                         (hidden[layer][0],hidden[layer][1])
                         )
                 else:
@@ -187,18 +193,21 @@ class Conv2dLSTM(nn.Module):
         return out
 
 class Conv2dGRU(nn.Module):
-    def __init__(self, input_size, hidden_size, kernel_size, num_layers, bias, output_size):
+    def __init__(self, input_size: int, hidden_size: int, kernel_size: int | tuple[int, int], num_layers: int, bias: bool, output_size: int):
         super(Conv2dGRU, self).__init__()
 
         self.input_size = input_size
         self.hidden_size = hidden_size
 
-        if type(kernel_size) == tuple and len(kernel_size) == 2:
-            self.kernel_size = kernel_size
-            self.padding = (kernel_size[0] // 2, kernel_size[1] // 2)
-        elif type(kernel_size) == int:
+        if isinstance(kernel_size, int):
             self.kernel_size = (kernel_size, kernel_size)
             self.padding = (kernel_size // 2, kernel_size // 2)
+        elif isinstance(kernel_size, tuple):
+            if len(kernel_size) == 2:
+                self.kernel_size = kernel_size
+                self.padding = (kernel_size[0] // 2, kernel_size[1] // 2)
+            else:
+                raise ValueError("Kernel tuple must have length 2")
         else:
             raise ValueError("Invalid kernel size.")
 
@@ -225,17 +234,17 @@ class Conv2dGRU(nn.Module):
                              bias=self.bias)
 
 
-    def forward(self, input, hx=None):
+    def forward(self, input_, hx = None):
 
-        # Input of shape (batch_size, seqence length, input_size)
+        # Input of shape (batch_size, sequence length, input_size)
         #
         # Output of shape (batch_size, output_size)
 
         if hx is None:
             if torch.cuda.is_available():
-                h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda()
+                h0 = torch.zeros(self.num_layers, input_.size(0), self.hidden_size, input_.size(-2), input_.size(-1)).cuda()
             else:
-                h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1))
+                h0 = torch.zeros(self.num_layers, input_.size(0), self.hidden_size, input_.size(-2), input_.size(-1))
 
         else:
              h0 = hx
@@ -246,12 +255,12 @@ class Conv2dGRU(nn.Module):
         for layer in range(self.num_layers):
             hidden.append(h0[layer])
         
-        for t in range(input.size(1)):
-            hidden_l = []  # Supress unbound variable warning
+        for t in range(input_.size(1)):
+            hidden_l = []  # supress unbound variable warning
             for layer in range(self.num_layers):
 
                 if layer == 0:
-                    hidden_l = self.rnn_cell_list[layer](input[:, t, :], hidden[layer])
+                    hidden_l = self.rnn_cell_list[layer](input_[:, t, :], hidden[layer])
                 else:
                     hidden_l = self.rnn_cell_list[layer](hidden[layer - 1],hidden[layer])
                 hidden[layer] = hidden_l
@@ -268,19 +277,22 @@ class Conv2dGRU(nn.Module):
         return out
 
 class Conv2dBidirRecurrentModel(nn.Module):
-    def __init__(self, mode, input_size, hidden_size, kernel_size, num_layers, bias, output_size):
+    def __init__(self, mode: str, input_size: int, hidden_size: int, kernel_size: int | tuple[int, int], num_layers: int, bias: bool, output_size: int):
         super(Conv2dBidirRecurrentModel, self).__init__()
 
         self.mode = mode
         self.input_size = input_size
         self.hidden_size = hidden_size
 
-        if type(kernel_size) == tuple and len(kernel_size) == 2:
-            self.kernel_size = kernel_size
-            self.padding = (kernel_size[0] // 2, kernel_size[1] // 2)
-        elif type(kernel_size) == int:
+        if isinstance(kernel_size, int):
             self.kernel_size = (kernel_size, kernel_size)
             self.padding = (kernel_size // 2, kernel_size // 2)
+        elif isinstance(kernel_size, tuple):
+            if len(kernel_size) == 2:
+                self.kernel_size = kernel_size
+                self.padding = (kernel_size[0] // 2, kernel_size[1] // 2)
+            else:
+                raise ValueError("Kernel tuple must have length 2")
         else:
             raise ValueError("Invalid kernel size.")
 
@@ -291,7 +303,6 @@ class Conv2dBidirRecurrentModel(nn.Module):
         self.rnn_cell_list = nn.ModuleList()
 
         if mode == 'LSTM':
-
             self.rnn_cell_list.append(Conv2dLSTMCell(self.input_size,
                                               self.hidden_size,
                                               self.kernel_size,
@@ -347,21 +358,21 @@ class Conv2dBidirRecurrentModel(nn.Module):
                              padding=self.padding,
                              bias=self.bias)
 
-    def forward(self, input, hx=None):
+    def forward(self, input_, hx = None):
 
         # Input of shape (batch_size, sequence length, input_size)
         #
         # Output of shape (batch_size, output_size)
 
         if torch.cuda.is_available():
-            h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda()
+            h0 = torch.zeros(self.num_layers, input_.size(0), self.hidden_size, input_.size(-2), input_.size(-1)).cuda()
         else:
-            h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1))
+            h0 = torch.zeros(self.num_layers, input_.size(0), self.hidden_size, input_.size(-2), input_.size(-1))
 
         if torch.cuda.is_available():
-            hT = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda()
+            hT = torch.zeros(self.num_layers, input_.size(0), self.hidden_size, input_.size(-2), input_.size(-1)).cuda()
         else:
-            hT = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1))
+            hT = torch.zeros(self.num_layers, input_.size(0), self.hidden_size, input_.size(-2), input_.size(-1))
 
         outs = []
         outs_rev = []
@@ -380,9 +391,9 @@ class Conv2dBidirRecurrentModel(nn.Module):
             else:
                 hidden_backward.append(hT[layer])
 
-        for t in range(input.shape[1]):
-            h_forward_l = []  # Supress unbound variable warning
-            h_back_l = []  # Supress unbound variable warning
+        for t in range(input_.shape[1]):
+            h_forward_l = []  # supress unbound variable warning
+            h_back_l = []  # supress unbound variable warning
 
             for layer in range(self.num_layers):
 
@@ -391,12 +402,12 @@ class Conv2dBidirRecurrentModel(nn.Module):
                     if layer == 0:
                         # Forward net
                         h_forward_l = self.rnn_cell_list[layer](
-                            input[:, t, :],
+                            input_[:, t, :],
                             (hidden_forward[layer][0], hidden_forward[layer][1])
                             )
                         # Backward net
                         h_back_l = self.rnn_cell_list[layer](
-                            input[:, -(t + 1), :],
+                            input_[:, -(t + 1), :],
                             (hidden_backward[layer][0], hidden_backward[layer][1])
                             )
                     else:
@@ -415,9 +426,9 @@ class Conv2dBidirRecurrentModel(nn.Module):
                     # If RNN{_TANH/_RELU} / GRU
                     if layer == 0:
                         # Forward net
-                        h_forward_l = self.rnn_cell_list[layer](input[:, t, :], hidden_forward[layer])
+                        h_forward_l = self.rnn_cell_list[layer](input_[:, t, :], hidden_forward[layer])
                         # Backward net
-                        h_back_l = self.rnn_cell_list[layer](input[:, -(t + 1), :], hidden_backward[layer])
+                        h_back_l = self.rnn_cell_list[layer](input_[:, -(t + 1), :], hidden_backward[layer])
                     else:
                         # Forward net
                         h_forward_l = self.rnn_cell_list[layer](hidden_forward[layer - 1], hidden_forward[layer])
