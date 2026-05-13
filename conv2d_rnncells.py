@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 import numpy as np
 
 class Conv2dLSTMCell(nn.Module):
@@ -48,11 +47,14 @@ class Conv2dLSTMCell(nn.Module):
         #       hy: of shape (batch_size, hidden_size, height_size, width_size)
         #       cy: of shape (batch_size, hidden_size, height_size, width_size)
 
-        if self.Wc == None:
-            self.Wc = nn.Parameter(torch.zeros((1, self.hidden_size * 3, input.size(2), input.size(3))))
+        if self.Wc is None:
+            if torch.cuda.is_available():
+                self.Wc = nn.Parameter(torch.zeros((1, self.hidden_size * 3, input.size(2), input.size(3))).cuda())
+            else:
+                self.Wc = nn.Parameter(torch.zeros((1, self.hidden_size * 3, input.size(2), input.size(3))))
 
         if hx is None:
-            hx = Variable(input.new_zeros(input.size(0), self.hidden_size, input.size(2), input.size(3)))
+            hx = input.new_zeros(input.size(0), self.hidden_size, input.size(2), input.size(3))
             hx = (hx, hx)
         hx, cx = hx
 
@@ -125,7 +127,7 @@ class Conv2dRNNCell(nn.Module):
         #       hy: of shape (batch_size, hidden_size, height_size, width_size)
 
         if hx is None:
-            hx = Variable(input.new_zeros(input.size(0), self.hidden_size, input.size(2), input.size(3)))
+            hx = input.new_zeros(input.size(0), self.hidden_size, input.size(2), input.size(3))
 
         hy = (self.x2h(input) + self.h2h(hx))
 
@@ -181,7 +183,7 @@ class Conv2dGRUCell(nn.Module):
         #       hy: of shape (batch_size, hidden_size, height_size, width_size)
 
         if hx is None:
-            hx = Variable(input.new_zeros(input.size(0), self.hidden_size, input.size(2), input.size(3)))
+            hx = input.new_zeros(input.size(0), self.hidden_size, input.size(2), input.size(3))
 
         x_t = self.x2h(input)
         h_t = self.h2h(hx)

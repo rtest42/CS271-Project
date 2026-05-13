@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 import numpy as np
 
 from conv2d_rnncells import Conv2dLSTMCell, Conv2dGRUCell, Conv2dRNNCell
@@ -69,9 +68,9 @@ class Conv2dRNN(nn.Module):
 
         if hx is None:
             if torch.cuda.is_available():
-                h0 = Variable(torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda())
+                h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda()
             else:
-                h0 = Variable(torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)))
+                h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1))
 
         else:
              h0 = hx
@@ -92,7 +91,6 @@ class Conv2dRNN(nn.Module):
                     hidden_l = self.rnn_cell_list[layer](input[:, t], hidden[layer])
                 else:
                     hidden_l = self.rnn_cell_list[layer](hidden[layer - 1],hidden[layer])
-                hidden[layer] = hidden_l
 
                 hidden[layer] = hidden_l
 
@@ -151,9 +149,9 @@ class Conv2dLSTM(nn.Module):
 
         if hx is None:
             if torch.cuda.is_available():
-                h0 = Variable(torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda())
+                h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda()
             else:
-                h0 = Variable(torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)))
+                h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1))
         else:
              h0 = hx
 
@@ -235,9 +233,9 @@ class Conv2dGRU(nn.Module):
 
         if hx is None:
             if torch.cuda.is_available():
-                h0 = Variable(torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda())
+                h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda()
             else:
-                h0 = Variable(torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)))
+                h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1))
 
         else:
              h0 = hx
@@ -356,14 +354,14 @@ class Conv2dBidirRecurrentModel(nn.Module):
         # Output of shape (batch_size, output_size)
 
         if torch.cuda.is_available():
-            h0 = Variable(torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda())
+            h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda()
         else:
-            h0 = Variable(torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)))
+            h0 = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1))
 
         if torch.cuda.is_available():
-            hT = Variable(torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda())
+            hT = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)).cuda()
         else:
-            hT = Variable(torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1)))
+            hT = torch.zeros(self.num_layers, input.size(0), self.hidden_size, input.size(-2), input.size(-1))
 
         outs = []
         outs_rev = []
