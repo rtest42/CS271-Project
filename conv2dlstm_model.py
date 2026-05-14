@@ -1,3 +1,5 @@
+import itertools
+
 import mlflow
 import mlflow.pytorch
 import os
@@ -62,89 +64,54 @@ def evaluate(model, loader, criterion, device, use_amp):
 # Main
 # =========================================================
 
-def main():
-    mlflow.set_experiment("conv2d_lstm_model")
-
-    # Load data
-    ds = xr.open_dataset("2m_temperature_5.625deg/2m_temperature_1999_5.625deg.nc")
-
-    data = torch.tensor(ds["t2m"].values - 273.15, dtype=torch.float32)  # convert from Kelvin to Celsius
-    mean = data.mean()
-    std = data.std()
-    data = (data - mean) / std  # normalize data
-
-    # Dataset
-    window = 24
-    dataset = ClimateDataset(data, window=window)
-
-    n = len(dataset)
-
-    train_end = int(0.7 * n)
-    val_end = int(0.85 * n)
-
-    gap = window  # Prevent temporal leakage
-
-    train_dataset = torch.utils.data.Subset(
-        dataset,
-        range(0, train_end)
-    )
-
-    val_dataset = torch.utils.data.Subset(
-        dataset,
-        range(train_end + gap, val_end)
-    )
-
-    test_dataset = torch.utils.data.Subset(
-        dataset,
-        range(val_end + gap, n)
-    )
+def run_experiment(config, train_dataset, val_dataset, test_dataset, dataset, ds, device, use_amp, window, val_end, gap, std, mean):
+    hidden_size = config["hidden_size"]
+    num_layers = config["num_layers"]
+    kernel_size = config["kernel_size"]
+    batch_size = config["batch_size"]
+    lr = config["lr"]
 
     # Data loaders
-
     train_loader = DataLoader(
         train_dataset,
-        batch_size=16,
+        batch_size=batch_size,
         shuffle=True,
         num_workers=0,
-        pin_memory=True,
+        pin_memory=use_amp,
         # persistent_workers=True
     )
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=16,
+        batch_size=batch_size,
         shuffle=False,
         num_workers=0,
-        pin_memory=True,
+        pin_memory=use_amp,
         # persistent_workers=True
     )
 
     test_loader = DataLoader(
         test_dataset,
-        batch_size=16,
+        batch_size=batch_size,
         shuffle=False,
         num_workers=0,
-        pin_memory=True,
+        pin_memory=use_amp,
         # persistent_workers=True
     )
-
-    # Device assignment
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    use_amp = device.type == "cuda"
 
     # Convolutional 2D LSTM
     model = Conv2dLSTM(
         input_size=1,
-        hidden_size=16,
-        kernel_size=3,
-        num_layers=1,
+        hidden_size=hidden_size,
+        kernel_size=kernel_size,
+        num_layers=num_layers,
         bias=True,
         output_size=1
     ).to(device)
 
     # Training setup
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode="min",
@@ -158,29 +125,24 @@ def main():
     patience_counter = 0
     best_val_loss = float("inf")
 
-    with mlflow.start_run():
+    with mlflow.start_run(run_name=f"h{hidden_size}_k{kernel_size}_lr{lr}_b{batch_size}", nested=True) as run:
         mlflow.log_param("window", window)
-        mlflow.log_param("hidden_size", 16)
-        mlflow.log_param("lr", 1e-3)
-        mlflow.log_param("batch_size", 16)
-        mlflow.log_param("model", "Conv2dLSTM")
-        mlflow.log_param("norm_mean", mean.item())
-        mlflow.log_param("norm_std", std.item())
-
+        mlflow.log_params(config)
+        best_model_path = "best_model_{}.pt".format(run.info.run_id)
         # Training loop
         for epoch in range(num_epochs):
 
             model.train()
             train_loss = 0
 
-            loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False)
+            loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False, disable=True)
             for x, y in loop:
                 x = x.to(device, non_blocking=True)
                 y = y.to(device, non_blocking=True)
 
                 optimizer.zero_grad(set_to_none=True)
 
-                with torch.amp.autocast(device_type="cuda", enabled=use_amp):
+                with torch.amp.autocast(device_type=device.type, enabled=use_amp):
                     pred = model(x)
                     loss: torch.Tensor = criterion(pred, y)
 
@@ -207,7 +169,7 @@ def main():
             )
 
             scheduler.step(avg_val_loss)
-
+            mlflow.log_metric("lr", optimizer.param_groups[0]["lr"], step=epoch+1)
             mlflow.log_metric("train_loss", avg_train_loss, step=epoch+1)
             mlflow.log_metric("val_loss", avg_val_loss, step=epoch+1)
             tqdm.write(
@@ -221,7 +183,7 @@ def main():
                 best_val_loss = avg_val_loss
                 patience_counter = 0
 
-                torch.save(model.state_dict(), "best_model.pt")
+                torch.save(model.state_dict(), best_model_path)
             else:
                 patience_counter += 1
                 if patience_counter >= patience:
@@ -229,8 +191,9 @@ def main():
                     break
 
         # Load best model
-        model.load_state_dict(torch.load("best_model.pt"))
+        model.load_state_dict(torch.load(best_model_path, map_location=device))
         mlflow.pytorch.log_model(model, "model")
+        os.remove(best_model_path)
 
         # Test evaluation
         avg_test_loss = evaluate(
@@ -240,12 +203,15 @@ def main():
             device,
             use_amp
         )
-
-        test_rmse = avg_test_loss ** 0.5
+        
+        rmse = avg_test_loss ** 0.5
         mlflow.log_metric("test_loss", avg_test_loss)
-        mlflow.log_metric("test_rmse", test_rmse)
+        mlflow.log_metric("test_rmse", rmse)
         mlflow.log_metric("best_val_loss", best_val_loss)
-        tqdm.write(f"Test Loss: {avg_test_loss:.6f} / Test RMSE: {test_rmse:.6f}")
+        test_rmse_c = rmse * std.item()
+        mlflow.log_metric("test_rmse_c", test_rmse_c)
+        mlflow.log_metric("best_val_rmse_c", (best_val_loss ** 0.5) * std.item())
+        tqdm.write(f"Test Loss: {avg_test_loss:.6f} / Test RMSE: {rmse:.6f} (STD: {std.item():.6f})")
         tqdm.write(f"Best val loss: {best_val_loss:.6f}")
 
         # Visualization
@@ -286,19 +252,117 @@ def main():
 
         output_dir = "outputs"
         os.makedirs(output_dir, exist_ok=True)
-        save_path = f"{output_dir}/conv2d_lstm_w{window}_hidden{hidden_size}_lr{str(learning_rate).replace('.', '_')}_batch{batch_size}.png"
+        save_path = (
+            f"{output_dir}/"
+            f"conv2d_lstm_w{window}"
+            f"_h{hidden_size}"
+            f"_k{kernel_size}"
+            f"_b{batch_size}"
+            f"_lr{str(lr).replace('.', '_')}.png"
+        )
         plt.savefig(save_path)
         plt.close(fig)
-        mlflow.log_artifact(save_path)
+        mlflow.log_artifact(save_path, artifact_path="plots")
+        return best_val_loss
+
+
+def main(params: dict, filename: str):
+    mlflow.set_experiment("conv2d_lstm")
+
+    keys = list(params.keys())
+    configs = list(itertools.product(*params.values()))
+
+    best_score = float("inf")
+    best_config = None
+
+    # Load data
+    ds = xr.open_dataset(filename)
+
+    data = torch.tensor(ds["t2m"].values - 273.15, dtype=torch.float32)  # convert from Kelvin to Celsius
+    mean = data.mean()
+    std = data.std()
+    data = (data - mean) / std  # normalize data
+
+    # Device assignment
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    use_amp = device.type == "cuda"
+
+    with mlflow.start_run(run_name="conv2d_lstm_sweep"):
+        mlflow.log_param("num_configs", len(configs))
+        mlflow.log_param("dataset", os.path.basename(filename))
+
+        for values in tqdm(configs, desc="Hyperparameter tuning"):
+            config = dict(zip(keys, values))
+
+
+            # Dataset
+            window = config["window_size"]
+
+            dataset = ClimateDataset(data, window=window)
+
+            gap = window  # Prevent temporal leakage
+
+            n = len(dataset)
+
+            train_end = int(0.7 * n)
+            val_end = int(0.85 * n)
+
+            train_dataset = torch.utils.data.Subset(
+                dataset,
+                range(0, train_end)
+            )
+
+            val_dataset = torch.utils.data.Subset(
+                dataset,
+                range(train_end + gap, val_end)
+            )
+
+            test_dataset = torch.utils.data.Subset(
+                dataset,
+                range(val_end + gap, n)
+            )
+
+            tqdm.write(f"Running config {config}")
+
+            score = run_experiment(
+                config=config,
+                train_dataset=train_dataset,
+                val_dataset=val_dataset,
+                test_dataset=test_dataset,
+                dataset=dataset,
+                ds=ds,
+                device=device,
+                use_amp=use_amp,
+                window=window,
+                val_end=val_end,
+                gap=gap,
+                mean=mean,
+                std=std,
+            )
+
+            if score < best_score:
+                best_score = score
+                best_config = config
+
+        tqdm.write(f"Best config: {best_config}")
+        tqdm.write(f"Best val loss: {best_score}")
+
+        mlflow.log_metric("best_val_loss", best_score)
+        if best_config is not None:
+            for k, v in best_config.items():
+                mlflow.log_param(f"best_{k}", v)
 
 
 if __name__ == "__main__":
     # Configure hyperparameters here.
     param_grid = {
-        "hidden_size": [8, 16, 32],
+        "window_size": [12, 24, 48, 72],
+        "hidden_size": [16, 32],
         "num_layers": [1, 2],
         "kernel_size": [3, 5],
-        "lr": [1e-3, 3e-4]
+        "lr": [1e-3, 3e-4],
+        "batch_size": [16, 32]
     }
+    file_name = "2m_temperature_5.625deg/2m_temperature_2005_5.625deg.nc"
 
-    main(params=param_grid)
+    main(params=param_grid, filename=file_name)

@@ -11,7 +11,7 @@ from sklearn.kernel_ridge import KernelRidge
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error, r2_score
-from sklearn.model_selection import ParameterSampler
+from sklearn.model_selection import ParameterGrid
 from tqdm import tqdm
 from typing import cast
 
@@ -161,7 +161,7 @@ def visualize_prediction(y_true: np.ndarray, y_pred: np.ndarray, grid_coords: xr
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close(fig)
-    mlflow.log_artifact(save_path)
+    mlflow.log_artifact(save_path, artifact_path="plots")
 
 
 # =========================================================
@@ -184,97 +184,97 @@ def main(file_paths: list[str] | str, window_values: list[int], alpha_values: li
         "gamma": gamma_values
     }
 
-    param_samples = list(ParameterSampler(
-        param_dist,
-        n_iter=12,
-        random_state=42
-    ))
+    param_samples = list(ParameterGrid(param_dist))
 
     data = prepare_data(filepaths=file_paths, window=max(window_values))
 
     best_val_rmse = float("inf")
     best_params = None
+    with mlflow.start_run(run_name="kernel_ridge_sweep"):
+        for params in tqdm(param_samples, position=0):
+            window_ = params["window_size"]
+            alpha_ = params["alpha"]
+            gamma_ = params["gamma"]
 
-    for params in tqdm(param_samples, position=0):
-        window_ = params["window_size"]
-        alpha_ = params["alpha"]
-        gamma_ = params["gamma"]
+            # Feature slicing
+            x_train = data.x_train[:, -window_:, :]
+            x_val = data.x_val[:, -window_:, :]
+            x_test = data.x_test[:, -window_:, :]
 
-        # Feature slicing
-        x_train = data.x_train[:, -window_:, :]
-        x_val = data.x_val[:, -window_:, :]
-        x_test = data.x_test[:, -window_:, :]
+            # Flatten ONLY for model
+            x_train_flat = x_train.reshape(len(x_train), -1)
+            x_val_flat = x_val.reshape(len(x_val), -1)
+            x_test_flat = x_test.reshape(len(x_test), -1)
 
-        # Flatten ONLY for model
-        x_train_flat = x_train.reshape(len(x_train), -1)
-        x_val_flat = x_val.reshape(len(x_val), -1)
-        x_test_flat = x_test.reshape(len(x_test), -1)
+            gamma_effective = gamma_ / x_train_flat.shape[1]
 
-        gamma_effective = gamma_ / x_train_flat.shape[1]
+            # Residual target
+            data_window = data
+            y_train_res = data.y_train - persistence(x_train)
 
-        # Residual target
-        data_window = data
-        y_train_res = data.y_train - persistence(x_train)
+            # Train model
+            model = KernelRidgeTempPredictor(alpha=alpha_, gamma=gamma_effective)
+            model.train(x_train_flat, y_train_res)
 
-        # Train model
-        model = KernelRidgeTempPredictor(alpha=alpha_, gamma=gamma_effective)
-        model.train(x_train_flat, y_train_res)
+            # Evaluate
+            train_result = model.evaluate(x_train, x_train_flat, data_window.y_train)
+            val_result = model.evaluate(x_val, x_val_flat, data_window.y_val)
+            test_result = model.evaluate(x_test, x_test_flat, data_window.y_test)
 
-        # Evaluate
-        train_result = model.evaluate(x_train, x_train_flat, data_window.y_train)
-        val_result = model.evaluate(x_val, x_val_flat, data_window.y_val)
-        test_result = model.evaluate(x_test, x_test_flat, data_window.y_test)
+            # Persistence baseline
+            baseline_rmse = root_mean_squared_error(data_window.y_test, persistence(x_test))
 
-        # Persistence baseline
-        baseline_rmse = root_mean_squared_error(data_window.y_test, persistence(x_test))
+            with mlflow.start_run(run_name=f"w{window_}_a{alpha_}_g{gamma_}", nested=True):
+                # Log parameters
+                mlflow.log_param("window_size", window_)
+                mlflow.log_param("alpha", alpha_)
+                mlflow.log_param("gamma", gamma_)
+                mlflow.log_param("gamma_effective", gamma_effective)
 
-        with mlflow.start_run(nested=True):
-            # Log parameters
-            mlflow.log_param("window_size", window_)
-            mlflow.log_param("alpha", alpha_)
-            mlflow.log_param("gamma", gamma_)
+                # Log metrics
+                improvement = (baseline_rmse - test_result.rmse) / baseline_rmse * 100
+                mlflow.log_metric("train_mae", train_result.mae)
+                mlflow.log_metric("train_rmse", train_result.rmse)
+                mlflow.log_metric("train_r2", train_result.r2)
+                mlflow.log_metric("val_mae", val_result.mae)
+                mlflow.log_metric("val_rmse", val_result.rmse)
+                mlflow.log_metric("val_r2", val_result.r2)
+                mlflow.log_metric("test_mae", test_result.mae)
+                mlflow.log_metric("test_rmse", test_result.rmse)
+                mlflow.log_metric("test_r2", test_result.r2)
+                mlflow.log_metric("baseline_rmse", baseline_rmse)
+                mlflow.log_metric("rmse_improvement", improvement)
 
-            # Log metrics
-            improvement = (baseline_rmse - test_result.rmse) / baseline_rmse * 100
-            mlflow.log_metric("train_mae", train_result.mae)
-            mlflow.log_metric("train_rmse", train_result.rmse)
-            mlflow.log_metric("train_r2", train_result.r2)
-            mlflow.log_metric("test_mae", test_result.mae)
-            mlflow.log_metric("test_rmse", test_result.rmse)
-            mlflow.log_metric("test_r2", test_result.r2)
-            mlflow.log_metric("baseline_rmse", baseline_rmse)
-            mlflow.log_metric("rmse_improvement", improvement)
+                # Save the best model
+                if val_result.rmse < best_val_rmse:
+                    best_val_rmse = val_result.rmse
+                    best_params = params
 
-            # Save the best model
-            if val_result.rmse < best_val_rmse:
-                best_val_rmse = val_result.rmse
-                best_params = params
+                    # Log model
+                    mlflow.sklearn.log_model(
+                        sk_model=model.model,
+                        name=f"kernel_ridge_w{window_}_a{str(alpha_).replace('.', '_')}_g{str(gamma_).replace('.', '_')}",
+                        serialization_format="skops",
+                        pip_requirements=["scikit-learn", "numpy"]
+                    )
 
-                # Log model
-                mlflow.sklearn.log_model(
-                    sk_model=model.model,
-                    name=f"kernel_ridge_w{window_}_a{str(alpha_).replace('.', '_')}_g{str(gamma_).replace('.', '_')}",
-                    serialization_format="skops",
-                    pip_requirements=["scikit-learn", "numpy"]
+                # Print results
+                tqdm.write(f"Parameters for kernel ridge: window_size={window_} hours, alpha={alpha_}, gamma={gamma_}")
+                tqdm.write(f"Test Metrics: {str(test_result)}")
+                tqdm.write(f"Baseline improvement: {improvement:.2f}%")
+
+                # Visualize using plots
+                visualize_prediction(
+                    y_true=data_window.y_test,
+                    y_pred=test_result.predictions,
+                    grid_coords=data_window.grid_coords,
+                    ds=data_window.ds,
+                    idx=0,
+                    save_path=f"{output_dir}/kernel_ridge_w{window_}_a{str(alpha_).replace('.', '_')}_g{str(gamma_).replace('.', '_')}.png"
                 )
 
-            # Print results
-            tqdm.write(f"Parameters for kernel ridge: window_size={window_} hours, alpha={alpha_}, gamma={gamma_}")
-            tqdm.write(f"Test Metrics: {str(test_result)}")
-            tqdm.write(f"Baseline improvement: {improvement:.2f}%")
-
-            # Visualize using plots
-            visualize_prediction(
-                y_true=data_window.y_test,
-                y_pred=test_result.predictions,
-                grid_coords=data_window.grid_coords,
-                ds=data_window.ds,
-                idx=0,
-                save_path=f"{output_dir}/kernel_ridge_w{window_}_a{str(alpha_).replace('.', '_')}_g{str(gamma_).replace('.', '_')}.png"
-            )
-
-    tqdm.write(f"Best Parameters: {str(best_params)}")
-    tqdm.write(f"Best validation RMSE: {best_val_rmse:.4f}")
+        tqdm.write(f"Best Parameters: {str(best_params)}")
+        tqdm.write(f"Best validation RMSE: {best_val_rmse:.4f}")
 
 if __name__ == "__main__":
     # Config

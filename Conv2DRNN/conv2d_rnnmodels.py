@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from conv2d_rnncells import Conv2dLSTMCell, Conv2dGRUCell, Conv2dRNNCell
+from .conv2d_rnncells import Conv2dLSTMCell, Conv2dGRUCell, Conv2dRNNCell
 
 class Conv2dRNN(nn.Module):
     def __init__(self, input_size: int, hidden_size: int, kernel_size: int | tuple[int, int], num_layers: int, bias: bool, output_size: int, activation: str = 'tanh'):
