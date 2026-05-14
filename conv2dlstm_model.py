@@ -192,7 +192,7 @@ def run_experiment(config, train_dataset, val_dataset, test_dataset, dataset, ds
 
         # Load best model
         model.load_state_dict(torch.load(best_model_path, map_location=device))
-        mlflow.pytorch.log_model(model, "model")
+        mlflow.pytorch.log_model(model, name="model", serialization_format="pt2", pip_requirements=["torch==2.11.0+cu130", "numpy", "xarray"])
         os.remove(best_model_path)
 
         # Test evaluation
@@ -203,7 +203,7 @@ def run_experiment(config, train_dataset, val_dataset, test_dataset, dataset, ds
             device,
             use_amp
         )
-        
+
         rmse = avg_test_loss ** 0.5
         mlflow.log_metric("test_loss", avg_test_loss)
         mlflow.log_metric("test_rmse", rmse)
