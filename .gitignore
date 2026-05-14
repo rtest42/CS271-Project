@@ -181,6 +181,7 @@ cython_debug/
 .cursorindexingignore
 
 # Datasets
+2m_temperature_5.625deg/
 *.nc
 
 # Machine Learning Models
@@ -191,3 +192,4 @@ mlruns/
 
 # Maps
 *.png
+outputs/
