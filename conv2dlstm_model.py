@@ -40,6 +40,9 @@ def evaluate(model, loader, criterion, device, use_amp):
 
     model.eval()
 
+    preds = []
+    trues = []
+
     total_loss = 0.0
 
     with torch.no_grad():
@@ -54,11 +57,18 @@ def evaluate(model, loader, criterion, device, use_amp):
                 enabled=use_amp
             ):
                 pred = model(x)
-                loss = criterion(pred, y)
 
+            preds.append(pred)
+            trues.append(y)
+            loss = criterion(pred, y)
             total_loss += loss.item()
+    preds = torch.cat(preds, dim=0)
+    trues = torch.cat(trues, dim=0)
 
-    return total_loss / len(loader)
+    mse = torch.mean((preds - trues) ** 2)
+    rmse = torch.sqrt(mse)
+
+    return mse.item()
 
 # =========================================================
 # Main
@@ -192,7 +202,7 @@ def run_experiment(config, train_dataset, val_dataset, test_dataset, dataset, ds
 
         # Load best model
         model.load_state_dict(torch.load(best_model_path, map_location=device))
-        mlflow.pytorch.log_model(model, name="model", serialization_format="pt2", pip_requirements=["torch==2.11.0+cu130", "numpy", "xarray"])
+        mlflow.pytorch.log_model(model, name="model", pip_requirements=["torch==2.11.0+cu130", "numpy", "xarray"])
         os.remove(best_model_path)
 
         # Test evaluation
@@ -356,12 +366,12 @@ def main(params: dict, filename: str):
 if __name__ == "__main__":
     # Configure hyperparameters here.
     param_grid = {
-        "window_size": [12, 24, 48, 72],
-        "hidden_size": [16, 32],
-        "num_layers": [1, 2],
-        "kernel_size": [3, 5],
-        "lr": [1e-3, 3e-4],
-        "batch_size": [16, 32]
+        "window_size": [24],
+        "hidden_size": [16],
+        "num_layers": [1],
+        "kernel_size": [3],
+        "lr": [1e-3],
+        "batch_size": [16]
     }
     file_name = "2m_temperature_5.625deg/2m_temperature_2005_5.625deg.nc"
 

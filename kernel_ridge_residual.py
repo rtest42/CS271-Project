@@ -279,9 +279,9 @@ def main(file_paths: list[str] | str, window_values: list[int], alpha_values: li
 if __name__ == "__main__":
     # Config
     file_paths_ = "2m_temperature_5.625deg/2m_temperature_2005_5.625deg.nc" # sorted(glob("2m_temperature_5.625deg/2m_temperature_????_5.625deg.nc"))
-    window_values_ = [12, 24, 48, 72] # [6, 12, 24, 48, 72, 168, 720]
-    alpha_values_ = [0.01, 0.1, 1.0, 10.0] # list(np.logspace(-2, 2, 10))
-    gamma_values_ = [1e-4, 1e-3, 1e-2, 1e-1]
+    window_values_ = [24] # [6, 12, 24, 48, 72, 168, 720]
+    alpha_values_ = [1.0] # list(np.logspace(-2, 2, 10))
+    gamma_values_ = [1e-2]
     # alpha_values_ = [10.0] # [0.01, 0.1, 1.0, 10.0, 100.0]
 
     main(file_paths=file_paths_, window_values=window_values_, alpha_values=alpha_values_, gamma_values=gamma_values_)
